@@ -20,12 +20,12 @@ Features:
 
 ## BUILD
 
-Depends on `c-ares`, `libcurl`, `libev`.
+Depends on `c-ares`, `libcurl`, `libuv`.
 
 On Debian-derived systems those are libc-ares-dev,
-libcurl4-{openssl,nss,gnutls}-dev and libev-dev respectively.
+libcurl4-{openssl,nss,gnutls}-dev and libuv-dev respectively.
 On Redhat-derived systems those are c-ares-devel, libcurl-devel and
-libev-devel.
+libuv-devel.
 
 ```
 $ cmake .
@@ -39,28 +39,6 @@ There is no installer at this stage - just run it.
 ```
 # ./https_dns_proxy -u nobody -g nogroup -d
 ```
-
-### OpenWRT package install
-
-I maintain a package in the [OpenWRT packages](https://github.com/openwrt/packages) repository as well.
-You can install as follows:
-
-```
-root@OpenWrt:~# opkg update
-root@OpenWrt:~# opkg install https_dns_proxy
-root@OpenWrt:~# /etc/init.d/https_dns_proxy enable
-root@OpenWrt:~# /etc/init.d/https_dns_proxy start
-```
-
-Replace any 'list server' lines in `/etc/config/dhcp` with:
-
-`list server '127.0.0.1#5053'`
-
-You may also want to add the line:
-
-`noresolv '1'`
-
-This prevents dnsmasq from using /etc/resolv.conf DNS servers, leaving only our proxy server.
 
 ## Usage
 
@@ -99,3 +77,4 @@ Usage: https_dns_proxy [-a <listen_addr>] [-p <listen_port>]
 ## AUTHORS
 
 * Aaron Drew (aarond10@gmail.com)
+* Jan Schlemminger (libuv port)
