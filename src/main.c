@@ -11,7 +11,7 @@
 #include <arpa/inet.h>
 #include <curl/curl.h>
 #include <errno.h>
-#include <ev.h>
+#include <uv.h>
 #include <grp.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -45,11 +45,11 @@ typedef struct {
   dns_server_t *dns_server;
 } request_t;
 
-static void sigint_cb(struct ev_loop *loop, ev_signal *w, int revents) {
-  ev_break(loop, EVBREAK_ALL);
+static void sigint_cb(uv_signal_t *w, int signum) {
+  uv_stop(w->loop);
 }
 
-static void sigpipe_cb(struct ev_loop *loop, ev_signal *w, int revents) {
+static void sigpipe_cb(uv_signal_t *w, int signum) {
   ELOG("Received SIGPIPE. Ignoring.");
 }
 
@@ -149,15 +149,15 @@ int main(int argc, char *argv[]) {
   ILOG("Built "__DATE__" "__TIME__".");
   ILOG("System c-ares: %s", ares_version(NULL));
   ILOG("System libcurl: %s", curl_version());
+  ILOG("System libuv: %s", uv_version_string());
 
   // Note: curl intentionally uses uninitialized stack variables and similar
   // tricks to increase it's entropy pool. This confuses valgrind and leaks
   // through to errors about use of uninitialized values in our code. :(
   curl_global_init(CURL_GLOBAL_DEFAULT);
 
-  // Note: This calls ev_default_loop(0) which never cleans up.
-  //       valgrind will report a leak. :(
-  struct ev_loop *loop = EV_DEFAULT;
+  uv_loop_t *loop = uv_default_loop();
+  uv_loop_init(loop);
 
   https_client_t https_client;
   https_client_init(&https_client, &opt, loop);
@@ -190,34 +190,34 @@ int main(int argc, char *argv[]) {
     daemon(0, 0);
   }
 
-  ev_signal sigpipe;
-  ev_signal_init(&sigpipe, sigpipe_cb, SIGPIPE);
-  ev_signal_start(loop, &sigpipe);
+  uv_signal_t sigpipe;
+  uv_signal_init(loop, &sigpipe);
+  uv_signal_start(&sigpipe, sigpipe_cb, SIGPIPE);
 
-  ev_signal sigint;
-  ev_signal_init(&sigint, sigint_cb, SIGINT);
-  ev_signal_start(loop, &sigint);
+  uv_signal_t sigint;
+  uv_signal_init(loop, &sigint);
+  uv_signal_start(&sigint, sigint_cb, SIGINT);
 
   logging_flush_init(loop);
 
   dns_poller_t dns_poller;
   if (!proxy_supports_name_resolution(opt.curl_proxy)) {
     dns_poller_init(&dns_poller, loop, opt.bootstrap_dns, "dns.google.com",
-                    120 /* seconds */, dns_poll_cb, &app.resolv);
+                    120000 /* milliseconds */, dns_poll_cb, &app.resolv);
   }
 
-  ev_run(loop, 0);
+  uv_run(loop, UV_RUN_DEFAULT);
 
   if (!proxy_supports_name_resolution(opt.curl_proxy))
     dns_poller_cleanup(&dns_poller);
 
   curl_slist_free_all(app.resolv);
 
-  ev_signal_stop(loop, &sigint);
+  uv_signal_stop(&sigint);
   dns_server_cleanup(&dns_server);
   https_client_cleanup(&https_client);
 
-  ev_loop_destroy(loop);
+  uv_loop_close(loop);
 
   curl_global_cleanup();
   logging_cleanup();

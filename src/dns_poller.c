@@ -12,28 +12,35 @@
 #include "dns_poller.h"
 #include "logging.h"
 
-static void sock_cb(struct ev_loop *loop, ev_io *w, int revents) {
+/* TBD: At the moment this code only shares one socket which seems somehow 
+ * to work but a cleaner and more scalable solution would be to create
+ * individual sockets and handles. */
+
+static void sock_cb(uv_poll_t *w, int status, int revents) {
   dns_poller_t *d = (dns_poller_t *)w->data;
-  ares_process_fd(d->ares, (revents & EV_READ) ? w->fd : ARES_SOCKET_BAD,
-                  (revents & EV_WRITE) ? w->fd : ARES_SOCKET_BAD);
+  if (status < 0) {
+    DLOG("Socket poll status error %s\n", uv_err_name(status));
+    ares_process_fd(d->ares, d->sock, d->sock);
+    return;
+  }
+  ares_process_fd(d->ares, (revents & UV_READABLE) ? d->sock : ARES_SOCKET_BAD,
+                  (revents & UV_WRITABLE) ? d->sock : ARES_SOCKET_BAD);
 }
 
-static void sock_state_cb(void *data, int fd, int read, int write) {
+static void sock_state_cb(void *data, ares_socket_t sock, int read, int write) {
   dns_poller_t *d = (dns_poller_t *)data;
   if (!read && !write) {
-    ev_io_stop(d->loop, &d->fd[fd]);
-    d->fd[fd].fd = 0;
-  } else if (d->fd[fd].fd != 0) {
-    ev_io_stop(d->loop, &d->fd[fd]);
-    ev_io_init(&d->fd[fd], sock_cb, fd,
-               (read ? EV_READ : 0) | (write ? EV_WRITE : 0));
-    d->fd[fd].data = d;
-    ev_io_start(d->loop, &d->fd[fd]);
+    uv_close((uv_handle_t *)&d->poll_handle, NULL);
+    d->poll_handle.data = NULL;
   } else {
-    ev_io_init(&d->fd[fd], sock_cb, fd,
-               (read ? EV_READ : 0) | (write ? EV_WRITE : 0));
-    d->fd[fd].data = d;
-    ev_io_start(d->loop, &d->fd[fd]);
+    if (d->poll_handle.data == NULL) {
+      uv_poll_init_socket(d->loop, &d->poll_handle, sock);
+      d->poll_handle.data = d;
+      d->sock = sock;
+    }
+    uv_poll_start(&d->poll_handle,
+                  (read ? UV_READABLE : 0) | (write ? UV_WRITABLE : 0),
+                  sock_cb);
   }
 }
 
@@ -48,19 +55,14 @@ static void ares_cb(void *arg, int status, int timeouts, struct hostent *h) {
   }
 }
 
-static void timer_cb(struct ev_loop *loop, ev_timer *w, int revents) {
+static void timer_cb(uv_timer_t *w) {
   dns_poller_t *d = (dns_poller_t *)w->data;
   ares_gethostbyname(d->ares, d->hostname, AF_INET, ares_cb, d);
 }
 
-void dns_poller_init(dns_poller_t *d, struct ev_loop *loop,
+void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
                      const char *bootstrap_dns, const char *hostname,
                      int interval_seconds, dns_poller_cb cb, void *cb_data) {
-  int i;
-  for (i = 0; i < FD_SETSIZE; i++) {
-    d->fd[i].fd = 0;
-  }
-
   int r;
   ares_library_init(ARES_LIB_INIT_ALL);
 
@@ -102,14 +104,15 @@ void dns_poller_init(dns_poller_t *d, struct ev_loop *loop,
   d->hostname = hostname;
   d->cb = cb;
   d->cb_data = cb_data;
+  d->poll_handle.data = NULL;
 
-  ev_timer_init(&d->timer, timer_cb, 0, interval_seconds);
+  uv_timer_init(d->loop, &d->timer);
   d->timer.data = d;
-  ev_timer_start(d->loop, &d->timer);
+  uv_timer_start(&d->timer, timer_cb, 0, interval_seconds);
 }
 
 void dns_poller_cleanup(dns_poller_t *d) {
-  ev_timer_stop(d->loop, &d->timer);
+  uv_timer_stop(&d->timer);
   ares_destroy(d->ares);
   ares_library_cleanup();
 }

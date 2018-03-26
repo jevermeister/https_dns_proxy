@@ -36,6 +36,19 @@ static size_t write_buffer(void *buf, size_t size, size_t nmemb, void *userp) {
   return size * nmemb;
 }
 
+static curl_context_t *create_curl_context(https_client_t *c,
+                                           curl_socket_t sockfd) {
+  curl_context_t *context;
+
+  context = (curl_context_t *)malloc(sizeof *context);
+  context->sockfd = sockfd;
+  context->c = c;
+  uv_poll_init_socket(c->loop, &context->poll_handle, sockfd);
+  context->poll_handle.data = context;
+
+  return context;
+}
+
 static void https_fetch_ctx_init(https_client_t *client,
                                  struct https_fetch_ctx *ctx, const char *url,
                                  struct curl_slist *resolv,
@@ -204,14 +217,21 @@ static void check_multi_info(https_client_t *c) {
   }
 }
 
-static void sock_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
-  https_client_t *c = (https_client_t *)w->data;
+static void curl_close_cb(uv_handle_t *handle) {
+  curl_context_t *context = (curl_context_t *)handle->data;
+  free(context);
+}
+
+static void sock_cb(uv_poll_t *w, int status, int revents) {
+  curl_context_t *context = (curl_context_t *)w->data;
+  https_client_t *c = context->c;
   if (c == NULL) {
     FLOG("c is NULL");
   }
   CURLMcode rc = curl_multi_socket_action(
-      c->curlm, w->fd, (revents & EV_READ ? CURL_CSELECT_IN : 0) |
-                           (revents & EV_WRITE ? CURL_CSELECT_OUT : 0),
+      c->curlm, context->sockfd,
+      (revents & UV_READABLE ? CURL_CSELECT_IN : 0) |
+      (revents & UV_WRITABLE ? CURL_CSELECT_OUT : 0),
       &c->still_running);
   if (rc != CURLM_OK) {
     FLOG("curl_multi_socket_action: %d", rc);
@@ -219,7 +239,7 @@ static void sock_cb(struct ev_loop *loop, struct ev_io *w, int revents) {
   check_multi_info(c);
 }
 
-static void timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents) {
+static void timer_cb(uv_timer_t *w) {
   https_client_t *c = (https_client_t *)w->data;
   CURLMcode rc = curl_multi_socket_action(c->curlm, CURL_SOCKET_TIMEOUT, 0,
                                           &c->still_running);
@@ -229,53 +249,72 @@ static void timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents) {
   check_multi_info(c);
 }
 
-static int multi_sock_cb(CURL *curl, curl_socket_t sock, int what,
+static int multi_sock_cb(CURL *curl, curl_socket_t sock, int action,
                          https_client_t *c, void *sockp) {
 #ifndef NO_LIBCURL_BUG_WORKAROUND
   static int curl_bug = -1;
   if (curl_bug == -1) {
-    if (what == CURL_POLL_IN) {
+    if (action == CURL_POLL_IN) {
       curl_bug = 0;
-    } else if (what == CURL_POLL_REMOVE) {
+    } else if (action == CURL_POLL_REMOVE) {
       ELOG("libcurl bug detected: socket closed without ever being read.");
       ELOG("Activating workaround.  PERFORMANCE WILL BE GREATLY DEGRADED!");
       curl_bug = 1;
     }
   }
-  if (curl_bug == 1 && what == CURL_POLL_REMOVE && c != NULL) {
+  if (curl_bug == 1 && action == CURL_POLL_REMOVE && c != NULL) {
     do {
       curl_multi_perform(c->curlm, &c->still_running);
     } while (c->still_running != 0);
   }
 #endif
-  if (what == CURL_POLL_REMOVE) {
-    ev_io_stop(c->loop, &c->fd[sock]);
-    c->fd[sock].fd = 0;
-    return 0;
-  } 
-  if (c->fd[sock].fd) {
-    ev_io_stop(c->loop, &c->fd[sock]);
+  curl_context_t *curl_context;
+  int events = 0;
+
+  switch (action) {
+    case CURL_POLL_IN:
+    case CURL_POLL_OUT:
+    case CURL_POLL_INOUT:
+      curl_context =
+          sockp ? (curl_context_t *)sockp : create_curl_context(c, sock);
+
+      curl_multi_assign(c->curlm, sock, (void *)curl_context);
+
+      if (action != CURL_POLL_IN) {
+        events |= UV_WRITABLE;
+      }
+      if (action != CURL_POLL_OUT) {
+        events |= UV_READABLE;
+      }
+
+      uv_poll_start(&curl_context->poll_handle, events, sock_cb);
+      break;
+    case CURL_POLL_REMOVE:
+      if (sockp) {
+        uv_poll_stop(&((curl_context_t *)sockp)->poll_handle);
+        /* not sure if that is needed */
+        uv_close((uv_handle_t *)sockp, curl_close_cb);
+        curl_multi_assign(c->curlm, sock, NULL);
+      }
+      break;
+    default:
+      abort();
   }
-  ev_io_init(&c->fd[sock], sock_cb, sock,
-             ((what & CURL_POLL_IN) ? EV_READ : 0) |
-                 ((what & CURL_POLL_OUT) ? EV_WRITE : 0));
-  c->fd[sock].data = c;
-  ev_io_start(c->loop, &c->fd[sock]);
+
   return 0;
 }
 
 static int multi_timer_cb(CURLM *multi, long timeout_ms, https_client_t *c) {
-  ev_timer_stop(c->loop, &c->timer);
+  uv_timer_stop(&c->timer);
   if (timeout_ms > 0) {
-    ev_timer_init(&c->timer, timer_cb, timeout_ms / 1000.0, 0);
-    ev_timer_start(c->loop, &c->timer);
+    uv_timer_start(&c->timer, timer_cb, timeout_ms, 0);
   } else {
-    timer_cb(c->loop, &c->timer, 0);
+    timer_cb(&c->timer);
   }
   return 0;
 }
 
-void https_client_init(https_client_t *c, options_t *opt, struct ev_loop *loop) {
+void https_client_init(https_client_t *c, options_t *opt, uv_loop_t *loop) {
   int i = 0;
 
   memset(c, 0, sizeof(*c));
@@ -284,11 +323,9 @@ void https_client_init(https_client_t *c, options_t *opt, struct ev_loop *loop) 
   c->fetches = NULL;
   c->timer.data = c;
 
-  for (i = 0; i < FD_SETSIZE; i++) {
-    c->fd[i].fd = 0;
-  }
-
   c->opt = opt;
+
+  uv_timer_init(c->loop, &c->timer);
 
 #if defined(CURLMOPT_PIPELINING) && defined(CURLPIPE_HTTP1) && \
   defined(CURLPIPE_MULTIPLEX)
@@ -326,11 +363,6 @@ void https_client_cleanup(https_client_t *c) {
     free(n);
   }
 
-  for (i = 0; i < FD_SETSIZE; i++) {
-    if (c->fd[i].fd) {
-      ev_io_stop(c->loop, &c->fd[i]);
-    }
-  }
-  ev_timer_stop(c->loop, &c->timer);
+  uv_timer_stop(&c->timer);
   curl_multi_cleanup(c->curlm);
 }

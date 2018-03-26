@@ -3,7 +3,7 @@
 
 #include <arpa/inet.h>
 #include <stdint.h>
-#include <ev.h>
+#include <uv.h>
 
 struct dns_server_s;
 
@@ -12,15 +12,14 @@ typedef void (*dns_req_received_cb)(struct dns_server_s *dns_server, void *data,
                                     uint16_t flags, const char *name, int type);
 
 typedef struct dns_server_s {
-  struct ev_loop *loop;
-  int sock;
+  uv_loop_t *loop;
   dns_req_received_cb cb;
   void *cb_data;
 
-  ev_io watcher;
+  uv_udp_t handle;
 } dns_server_t;
 
-void dns_server_init(dns_server_t *d, struct ev_loop *loop,
+void dns_server_init(dns_server_t *d, uv_loop_t *loop,
                      const char *listen_addr, int listen_port,
                      dns_req_received_cb cb, void *data);
 

@@ -1,7 +1,7 @@
 #ifndef _LOGGING_H_
 #define _LOGGING_H_
 
-#include <ev.h>
+#include <uv.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,7 +11,7 @@ extern "C" {
 void logging_init(int fd, int level);
 
 // Initialize periodic timer to flush logs.
-void logging_flush_init(struct ev_loop *loop);
+void logging_flush_init(uv_loop_t *loop);
 
 // Cleans up and flushes open logs.
 void logging_cleanup();

@@ -3,7 +3,7 @@
 
 #include <arpa/inet.h>
 #include <curl/curl.h>
-#include <ev.h>
+#include <uv.h>
 #include <stdint.h>
 
 #include "options.h"
@@ -23,26 +23,25 @@ struct https_fetch_ctx {
   struct https_fetch_ctx *next;
 };
 
-// Internal: Holds state on a socket watcher.
-struct https_fd_watcher {
-  ev_io watcher;
-  struct https_fd_watcher *next;
-};
-
 // Holds state on the whole multiplexed CURL machine.
 typedef struct {
-  struct ev_loop *loop;
+  uv_loop_t *loop;
   CURLM *curlm;
   struct https_fetch_ctx *fetches;
 
-  ev_timer timer;
-  ev_io fd[FD_SETSIZE]; // I'm lazy.
+  uv_timer_t timer;
   int still_running;
 
   options_t *opt;
 } https_client_t;
 
-void https_client_init(https_client_t *c, options_t *opt, struct ev_loop *loop);
+typedef struct curl_context_s {
+  uv_poll_t poll_handle;
+  curl_socket_t sockfd;
+  https_client_t *c;
+} curl_context_t;
+
+void https_client_init(https_client_t *c, options_t *opt, uv_loop_t *loop);
 
 void https_client_fetch(https_client_t *c, const char *url,
                         struct curl_slist *resolv, https_response_cb cb,
