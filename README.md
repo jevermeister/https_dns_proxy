@@ -41,10 +41,10 @@ only makes sense if you trust your DoH provider.
 
 ## Build
 
-Depends on `c-ares`, `libcurl`, `libev`.
+Depends on `c-ares`, `libcurl`, `libuv`.
 
 On Debian-derived systems those are libc-ares-dev,
-libcurl4-{openssl,nss,gnutls}-dev and libev-dev respectively.
+libcurl4-{openssl,nss,gnutls}-dev and libuv-dev respectively.
 On Redhat-derived systems those are c-ares-devel, libcurl-devel and
 libev-devel.
 
@@ -64,6 +64,7 @@ $ make
 
 There is no installer at this stage - just run it.
 
+<<<<<<< HEAD
 ### OpenWRT package install
 
 I maintain a package in the [OpenWRT packages](https://github.com/openwrt/packages) repository as well.
@@ -89,6 +90,8 @@ This prevents dnsmasq from using /etc/resolv.conf DNS servers, leaving only our 
 ### archlinux package install
 
 There is also an externally maintained [AUR package](https://aur.archlinux.org/packages/https-dns-proxy-git/) for latest git version. You can install as follows:
+=======
+>>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
 ```
 user@arch:~# yaourt -S https-dns-proxy-git
 ```
@@ -140,3 +143,4 @@ software does not and will not support DNS-over-TLS.
 ## Authors
 
 * Aaron Drew (aarond10@gmail.com)
+* Jan Schlemminger (libuv port)
