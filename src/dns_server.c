@@ -1,10 +1,11 @@
+#include <sys/socket.h>
 #include <sys/types.h>
 
 #include <ares.h>
 #include <arpa/inet.h>
 #include <curl/curl.h>
 #include <errno.h>
-#include <uv.h>
+#include <ev.h>
 #include <grp.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -20,26 +21,40 @@
 #include "dns_server.h"
 #include "logging.h"
 
-#define DNS_BUFFER_SIZE 1500
+// Creates and bind a listening UDP socket for incoming requests.
+static int get_listen_sock(const char *listen_addr, int listen_port) {
+  struct sockaddr_in laddr;
+  memset(&laddr, 0, sizeof(laddr));
+  laddr.sin_family = AF_INET;
+  laddr.sin_port = htons(listen_port);
+  laddr.sin_addr.s_addr = inet_addr(listen_addr);
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    FLOG("Error creating socket");
+  }
+  if (bind(sock, (struct sockaddr *)&laddr, sizeof(laddr)) < 0) {
+    FLOG("Error binding %s:%d", listen_addr, listen_port);
+  }
 
-static void alloc_buffer(uv_handle_t *client, size_t suggested_size,
-                         uv_buf_t *buf) {
-  *buf = uv_buf_init(malloc(DNS_BUFFER_SIZE), DNS_BUFFER_SIZE);
+  ILOG("Listening on %s:%d", listen_addr, listen_port);
+  return sock;
 }
 
-void receive_request_cb(uv_udp_t *req, ssize_t nread, const uv_buf_t *recbuf,
-                        const struct sockaddr *raddr, unsigned int ipflags) {
-  if (nread <= 0) {
-    /* 0 == nothing to read or empty UDP packet (depending on raddr == NULL)
-     * < 0 is socket error, on both cases we have to free resources */
-    if (nread < 0) {
-      WLOG("Reading socket failed: %s", strerror(errno));
-      uv_close((uv_handle_t *)req, NULL);
-    }
-    goto free_cb_resources;
+static void watcher_cb(struct ev_loop *loop, ev_io *w, int revents) {
+  dns_server_t *d = (dns_server_t *)w->data;
+
+  // A default MTU. We don't do TCP so any bigger is likely a waste.
+  unsigned char buf[1500];
+  struct sockaddr_in raddr;
+  socklen_t raddr_size = sizeof(raddr);
+  int len = recvfrom(w->fd, buf, sizeof(buf), 0, (struct sockaddr *)&raddr,
+                     &raddr_size);
+  if (len < 0) {
+    WLOG("recvfrom failed: %s", strerror(errno));
+    return;
   }
-  dns_server_t *d = (dns_server_t *)req->data;
-  unsigned char *p = recbuf->base;
+
+  unsigned char *p = buf;
   uint16_t tx_id = ntohs(*(uint16_t *)p);
   p += 2;
   uint16_t flags = ntohs(*(uint16_t *)p);
@@ -54,64 +69,41 @@ void receive_request_cb(uv_udp_t *req, ssize_t nread, const uv_buf_t *recbuf,
   p += 2;
   if (num_q != 1) {
     DLOG("Malformed request received.");
-    goto free_cb_resources;
+    return;
   };
   char *domain_name;
   long enc_len;
-  if (ares_expand_name(p, recbuf->base, nread, &domain_name, &enc_len) != ARES_SUCCESS) {
+  if (ares_expand_name(p, buf, len, &domain_name, &enc_len) != ARES_SUCCESS) {
     DLOG("Malformed request received.");
-    goto free_cb_resources;
+    return;
   }
   p += enc_len;
   uint16_t type = ntohs(*(uint16_t *)p);
 
-  d->cb(d, d->cb_data, *((struct sockaddr_in*)raddr), tx_id, flags, domain_name, type);
+  d->cb(d, d->cb_data, raddr, tx_id, flags, domain_name, type);
 
   ares_free_string(domain_name);
-free_cb_resources:
-  free(recbuf->base);
 }
 
-
-void dns_server_init(dns_server_t *d, uv_loop_t *loop,
+void dns_server_init(dns_server_t *d, struct ev_loop *loop,
                      const char *listen_addr, int listen_port,
                      dns_req_received_cb cb, void *data) {
   d->loop = loop;
+  d->sock = get_listen_sock(listen_addr, listen_port);
   d->cb = cb;
   d->cb_data = data;
-  struct sockaddr_in laddr;
-  
-  uv_ip4_addr(listen_addr, listen_port, &laddr);
-  int status = uv_udp_init(loop, &d->handle);
-  if (status < 0) {
-    FLOG("Error creating socket");
-  }
-  status = uv_udp_bind(&d->handle, (const struct sockaddr *)&laddr, 0);
-  if (status < 0) {
-    FLOG("Error binding %s:%d", listen_addr, listen_port);
-  }
 
-  ILOG("Listening on %s:%d", listen_addr, listen_port);
-
-  d->handle.data = d;
-  uv_udp_recv_start(&d->handle, alloc_buffer, receive_request_cb);
-}
-
-static void on_send(uv_udp_send_t *req, int status) {
-  if (status < 0) {
-    FLOG("DNS reply status error %s\n", uv_err_name(status));
-  }
-  free(req);
+  ev_io_init(&d->watcher, watcher_cb, d->sock, EV_READ);
+  d->watcher.data = d;
+  ev_io_start(d->loop, &d->watcher);
 }
 
 void dns_server_respond(dns_server_t *d, struct sockaddr_in raddr, char *buf,
                         int blen) {
-  uv_udp_send_t *send_req = malloc(sizeof(uv_udp_send_t));
-  uv_buf_t reply = uv_buf_init(buf, blen);
-  uv_udp_send(send_req, &d->handle, &reply, 1, (struct sockaddr *)&raddr,
-              on_send);
+  sendto(d->sock, buf, blen, 0, (struct sockaddr *)&raddr, sizeof(raddr));
 }
 
 void dns_server_cleanup(dns_server_t *d) {
-  uv_close((uv_handle_t *)&d->handle, NULL);
+  ev_io_stop(d->loop, &d->watcher);
+  close(d->sock);
 }

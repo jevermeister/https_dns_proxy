@@ -14,7 +14,7 @@
 
 static FILE *logf = NULL;
 static int loglevel = LOG_ERROR;
-static uv_timer_t logging_timer;
+static ev_timer logging_timer;
 
 // Renders a severity as a short string.
 static const char *SeverityStr(int severity) {
@@ -35,20 +35,20 @@ static const char *SeverityStr(int severity) {
   }
 }
 
-static void logging_timer_cb(uv_timer_t *w) {
+static void logging_timer_cb(struct ev_loop *loop, ev_timer *w, int revents) {
   if (logf) {
     fflush(logf);
   }
 }
 
-void logging_flush_init(uv_loop_t *loop) {
+void logging_flush_init(struct ev_loop *loop) {
   /* don't init timer if we will never write messages that are not flushed */
   if (loglevel >= LOG_FLUSH_LEVEL) {
     return;
   }
   DLOG("initializing periodic log flush timer");
-  uv_timer_init(loop, &logging_timer);
-  uv_timer_start(&logging_timer, logging_timer_cb, 0, 10000);
+  ev_timer_init(&logging_timer, logging_timer_cb, 0, 10);
+  ev_timer_start(loop, &logging_timer);
 }
 
 void logging_init(int fd, int level) {

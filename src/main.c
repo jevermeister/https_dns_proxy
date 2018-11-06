@@ -13,7 +13,7 @@
 #include <ctype.h>
 #include <curl/curl.h>
 #include <errno.h>
-#include <uv.h>
+#include <ev.h>
 #include <grp.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -69,16 +69,11 @@ static int hostname_from_uri(const char* uri,
   return 1;
 }
 
-<<<<<<< HEAD
 static void sigint_cb(struct ev_loop *loop, ev_signal *w, int revents) {
   ev_break(loop, EVBREAK_ALL);
-=======
-static void sigint_cb(uv_signal_t *w, int signum) {
-  uv_stop(w->loop);
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
 }
 
-static void sigpipe_cb(uv_signal_t *w, int signum) {
+static void sigpipe_cb(struct ev_loop *loop, ev_signal *w, int revents) {
   ELOG("Received SIGPIPE. Ignoring.");
 }
 
@@ -191,15 +186,15 @@ int main(int argc, char *argv[]) {
   ILOG("Built "__DATE__" "__TIME__".");
   ILOG("System c-ares: %s", ares_version(NULL));
   ILOG("System libcurl: %s", curl_version());
-  ILOG("System libuv: %s", uv_version_string());
 
   // Note: curl intentionally uses uninitialized stack variables and similar
   // tricks to increase it's entropy pool. This confuses valgrind and leaks
   // through to errors about use of uninitialized values in our code. :(
   curl_global_init(CURL_GLOBAL_DEFAULT);
 
-  uv_loop_t *loop = uv_default_loop();
-  uv_loop_init(loop);
+  // Note: This calls ev_default_loop(0) which never cleans up.
+  //       valgrind will report a leak. :(
+  struct ev_loop *loop = EV_DEFAULT;
 
   https_client_t https_client;
   https_client_init(&https_client, &opt, loop);
@@ -236,13 +231,13 @@ int main(int argc, char *argv[]) {
     daemon(0, 0);
   }
 
-  uv_signal_t sigpipe;
-  uv_signal_init(loop, &sigpipe);
-  uv_signal_start(&sigpipe, sigpipe_cb, SIGPIPE);
+  ev_signal sigpipe;
+  ev_signal_init(&sigpipe, sigpipe_cb, SIGPIPE);
+  ev_signal_start(loop, &sigpipe);
 
-  uv_signal_t sigint;
-  uv_signal_init(loop, &sigint);
-  uv_signal_start(&sigint, sigint_cb, SIGINT);
+  ev_signal sigint;
+  ev_signal_init(&sigint, sigint_cb, SIGINT);
+  ev_signal_start(loop, &sigint);
 
   logging_flush_init(loop);
 
@@ -260,7 +255,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  uv_run(loop, UV_RUN_DEFAULT);
+  ev_run(loop, 0);
 
   if (!proxy_supports_name_resolution(opt.curl_proxy)) {
     dns_poller_cleanup(&dns_poller);
@@ -268,11 +263,11 @@ int main(int argc, char *argv[]) {
 
   curl_slist_free_all(app.resolv);
 
-  uv_signal_stop(&sigint);
+  ev_signal_stop(loop, &sigint);
   dns_server_cleanup(&dns_server);
   https_client_cleanup(&https_client);
 
-  uv_loop_close(loop);
+  ev_loop_destroy(loop);
 
   curl_global_cleanup();
   logging_cleanup();
