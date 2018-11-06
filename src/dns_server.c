@@ -1,14 +1,26 @@
+#ifndef _WIN32
+	#include <sys/socket.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <winsock2.h>
+	# include <windows.h>
+# endif
+
 #include <sys/types.h>
 
 #include <ares.h>
-#include <arpa/inet.h>
+#ifndef _WIN32
+	#include <arpa/inet.h>
+#endif
 #include <curl/curl.h>
 #include <errno.h>
 #include <uv.h>
-#include <grp.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <pwd.h>
+#ifndef _WIN32
+	#include <grp.h>
+	#include <netdb.h>
+	#include <netinet/in.h>
+	#include <pwd.h>
+#endif
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>

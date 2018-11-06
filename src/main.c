@@ -4,18 +4,29 @@
 //
 // Intended for use with Google's Public-DNS over HTTPS service
 // (https://developers.google.com/speed/public-dns/docs/dns-over-https)
-#include <sys/socket.h>
+#ifndef _WIN32
+	#include <sys/socket.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <winsock2.h>
+	# include <windows.h>
+# endif
+
 #include <sys/types.h>
 
 #include <ares.h>
-#include <arpa/inet.h>
+#ifndef _WIN32
+	#include <arpa/inet.h>
+#endif
 #include <curl/curl.h>
 #include <errno.h>
 #include <uv.h>
-#include <grp.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <pwd.h>
+#ifndef _WIN32
+	#include <grp.h>
+	#include <netdb.h>
+	#include <netinet/in.h>
+	#include <pwd.h>
+#endif
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -44,7 +55,7 @@ typedef struct {
   struct sockaddr_in raddr;
   dns_server_t *dns_server;
 } request_t;
-
+#ifndef _WIN32
 static void sigint_cb(uv_signal_t *w, int signum) {
   uv_stop(w->loop);
 }
@@ -52,7 +63,7 @@ static void sigint_cb(uv_signal_t *w, int signum) {
 static void sigpipe_cb(uv_signal_t *w, int signum) {
   ELOG("Received SIGPIPE. Ignoring.");
 }
-
+#endif
 static void https_resp_cb(void *data, unsigned char *buf, unsigned int buflen) {
   DLOG("buflen %u\n", buflen);
   if (buf == NULL) { // Timeout, DNS failure, or something similar.
@@ -178,7 +189,7 @@ int main(int argc, char *argv[]) {
   dns_server_t dns_server;
   dns_server_init(&dns_server, loop, opt.listen_addr, opt.listen_port,
                   dns_server_cb, &app);
-
+#ifndef _WIN32
   if (opt.daemonize) {
     if (setgid(opt.gid)) {
       FLOG("Failed to set gid.");
@@ -197,7 +208,7 @@ int main(int argc, char *argv[]) {
   uv_signal_t sigint;
   uv_signal_init(loop, &sigint);
   uv_signal_start(&sigint, sigint_cb, SIGINT);
-
+#endif
   logging_flush_init(loop);
 
   dns_poller_t dns_poller;
@@ -212,8 +223,9 @@ int main(int argc, char *argv[]) {
     dns_poller_cleanup(&dns_poller);
 
   curl_slist_free_all(app.resolv);
-
+#ifndef _WIN32
   uv_signal_stop(&sigint);
+#endif
   dns_server_cleanup(&dns_server);
   https_client_cleanup(&https_client);
 

@@ -1,10 +1,20 @@
-#include <sys/socket.h>
+#ifndef _WIN32
+	#include <sys/socket.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <winsock2.h>
+	# include <windows.h>
+# endif
+
 #include <sys/types.h>
 
 #include <ares.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <netinet/in.h>
+#ifndef _WIN32
+	#include <arpa/inet.h>
+	#include <netdb.h>
+	#include <netinet/in.h>
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

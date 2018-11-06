@@ -1,7 +1,13 @@
 #ifndef _DNS_SERVER_H_
 #define _DNS_SERVER_H_
 
-#include <arpa/inet.h>
+#ifndef _WIN32
+	#include <arpa/inet.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <winsock2.h>
+	# include <windows.h>
+# endif
 #include <stdint.h>
 #include <uv.h>
 

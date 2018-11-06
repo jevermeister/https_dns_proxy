@@ -3,8 +3,15 @@
 
 #include <ctype.h>
 #include <fcntl.h>
-#include <grp.h>
-#include <pwd.h>
+#ifndef _WIN32
+	#include <grp.h>
+	#include <pwd.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <windows.h>
+# endif
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,11 +27,13 @@ void options_init(struct Options *opt) {
   opt->logfile = "-";
   opt->logfd = -1;
   opt->loglevel = LOG_ERROR;
+#ifndef _WIN32  
   opt->daemonize = 0;
   opt->user = "nobody";
   opt->group = "nobody";
   opt->uid = -1;
   opt->gid = -1;
+#endif
   //new as from https://dnsprivacy.org/wiki/display/DP/DNS+Privacy+Test+Servers
   opt->bootstrap_dns = "8.8.8.8,8.8.4.4,145.100.185.15,145.100.185.16,185.49.141.37,199.58.81.218,80.67.188.188"; 
   opt->curl_proxy = NULL;
@@ -44,6 +53,7 @@ int options_parse_args(struct Options *opt, int argc, char **argv) {
     case 'e': // edns_client_subnet
       opt->edns_client_subnet = optarg;
       break;
+#ifndef _WIN32	  
     case 'd': // daemonize
       opt->daemonize = 1;
       break;
@@ -53,6 +63,7 @@ int options_parse_args(struct Options *opt, int argc, char **argv) {
     case 'g': // group
       opt->group = optarg;
       break;
+#endif
     case 'b': // bootstrap dns servers
       opt->bootstrap_dns = optarg;
       break;
@@ -76,6 +87,7 @@ int options_parse_args(struct Options *opt, int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
   }
+#ifndef _WIN32
   if (opt->daemonize) {
     struct passwd *p;
     if (!(p = getpwnam(opt->user)) || !p->pw_uid) {
@@ -90,10 +102,15 @@ int options_parse_args(struct Options *opt, int argc, char **argv) {
     }
     opt->gid = g->gr_gid;
   }
+#endif
   if (!strcmp(opt->logfile, "-")) {
     opt->logfd = STDOUT_FILENO;
   } else if ((opt->logfd = open(opt->logfile, 
+#ifndef _WIN32
                                 O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC,
+#else
+								O_CREAT | O_WRONLY | O_APPEND,
+#endif
                                 S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)) <= 0) {
     printf("Logfile '%s' is not writable.\n", opt->logfile);
   }
@@ -104,8 +121,13 @@ void options_show_usage(int argc, char **argv) {
   struct Options defaults;
   options_init(&defaults);
   printf("Usage: %s [-a <listen_addr>] [-p <listen_port>]\n", argv[0]);
+#ifndef _WIN32  
   printf("        [-e <subnet>] [-d] [-u <user>] [-g <group>] [-b <dns_servers>]\n");
   printf("        [-l <logfile>]\n\n");
+#else
+  printf("        [-e <subnet>] [-b <dns_servers>] [-l <logfile>]\n\n");
+#endif
+
   printf("  -a listen_addr    Local address to bind to. (%s)\n",
          defaults.listen_addr);
   printf("  -p listen_port    Local port to bind to. (%d)\n",
@@ -113,11 +135,13 @@ void options_show_usage(int argc, char **argv) {
   printf("  -e subnet_addr    An edns-client-subnet to use such as "
                              "\"203.31.0.0/16\". (%s)\n",
          defaults.edns_client_subnet);
+#ifndef _WIN32		 
   printf("  -d                Daemonize.\n");
   printf("  -u user           User to drop to launched as root. (%s)\n",
          defaults.user);
   printf("  -g group          Group to drop to launched as root. (%s)\n",
          defaults.group);
+#endif
   printf("  -b dns_servers    Comma separated IPv4 address of DNS servers\n");
   printf("                    to resolve dns.google.com. (%s)\n",
          defaults.bootstrap_dns);

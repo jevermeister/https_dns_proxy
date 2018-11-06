@@ -1,7 +1,13 @@
 #ifndef _HTTPS_CLIENT_H_
 #define _HTTPS_CLIENT_H_
 
-#include <arpa/inet.h>
+#ifndef _WIN32
+	#include <arpa/inet.h>
+#else
+	# define WIN32_LEAN_AND_MEAN
+	# include <winsock2.h>
+	# include <windows.h>
+# endif
 #include <curl/curl.h>
 #include <uv.h>
 #include <stdint.h>

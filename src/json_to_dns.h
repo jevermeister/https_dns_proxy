@@ -1,6 +1,7 @@
 // A simple JSON -> DNS packet converter.
 #ifndef _JSON_TO_DNS_H_
 #define _JSON_TO_DNS_H_
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {

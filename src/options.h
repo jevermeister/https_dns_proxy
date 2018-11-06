@@ -21,7 +21,7 @@ struct Options {
   const char *logfile;
   int logfd;
   int loglevel;
-
+#ifndef _WIN32
   // Whether to fork into background.
   int daemonize;
 
@@ -33,7 +33,7 @@ struct Options {
   // Derived from the above.
   uid_t uid;
   gid_t gid;
-
+#endif
   // DNS servers to look up dns.google.com
   const char *bootstrap_dns;
 

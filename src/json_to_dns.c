@@ -1,17 +1,43 @@
 #include <sys/types.h>
 
 #include <ares.h>
-#include <arpa/inet.h>
-#include <arpa/nameser.h>
+#ifndef _WIN32
+  #include <arpa/inet.h>
+  #include <arpa/nameser.h>
+#else
+  #define WIN32_LEAN_AND_MEAN
+  #include <winsock2.h>
+  #include <windows.h>
+  #include <nameser.h>
+# endif
+
 #include <errno.h>
-#include <netinet/in.h>
-#include <resolv.h>
+#ifndef _WIN32
+  #include <netinet/in.h>
+  #include <resolv.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
 #include "json_to_dns.h"
 #include "logging.h"
 #include "nxjson/nxjson.h"
+#include <stdint.h>
+
+#ifdef _WIN32
+  #define NS_PUT16(s, cp) \
+    do {                                                                              \
+      uint16_t *t_cp = (uint16_t *) (cp);                                             \
+      *t_cp = htons (s);                                                              \
+      (cp) += sizeof(uint16_t);                                                       \
+    } while (0)
+  #define NS_PUT32(l, cp) \
+    do {                                                                              \
+      uint32_t *t_cp = (uint32_t *) (cp);                                             \
+      *t_cp = htonl (l);                                                              \
+      (cp) += sizeof(uint32_t);                                                       \
+    } while (0)
+#endif
 
 // Writes a string out, pascal style. limited to 63 bytes$
 // (max length without compression for a domain segment).
