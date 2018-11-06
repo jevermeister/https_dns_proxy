@@ -46,23 +46,39 @@ static void sock_state_cb(void *data, ares_socket_t sock, int read, int write) {
 
 static void ares_cb(void *arg, int status, int timeouts, struct hostent *h) {
   dns_poller_t *d = (dns_poller_t *)arg;
+  uint64_t interval;
+
   if (status != ARES_SUCCESS) {
-    WLOG("DNS lookup failed: %d", status);
+    interval = POLLER_INTVL_ERR;
+    WLOG("DNS lookup failed: %s", ares_strerror(status));
   } else if (!h || h->h_length < 1) {
+    interval = POLLER_INTVL_ERR;
     WLOG("No hosts.");
   } else {
-    d->cb(d->cb_data, (struct sockaddr_in *)h->h_addr_list[0]);
+    interval = POLLER_INTVL_NORM;
+    d->cb(d->hostname, d->cb_data, (struct sockaddr_in *)h->h_addr_list[0]);
+  }
+
+  if(interval != uv_timer_get_repeat(&d->timer)) {
+    DLOG("DNS poll interval changed from %i -> %i", uv_timer_get_repeat(&d->timer) / 1000, interval / 1000);
+    uv_timer_stop(&d->timer);
+    uv_timer_set_repeat(&d->timer, interval);
   }
 }
 
 static void timer_cb(uv_timer_t *w) {
   dns_poller_t *d = (dns_poller_t *)w->data;
+  // Cancel any pending queries before making new ones. c-ares can't be depended on to
+  // execute ares_cb() even after the specified query timeout has been reached, e.g. if
+  // the packet was dropped without any response from the network. This also serves to
+  // free memory tied up by any "zombie" queries.
+  ares_cancel(d->ares);
   ares_gethostbyname(d->ares, d->hostname, AF_INET, ares_cb, d);
 }
 
 void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
                      const char *bootstrap_dns, const char *hostname,
-                     int interval_seconds, dns_poller_cb cb, void *cb_data) {
+                     dns_poller_cb cb, void *cb_data) {
   int r;
   ares_library_init(ARES_LIB_INIT_ALL);
 
@@ -84,6 +100,7 @@ void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
     if (!options.servers) {
       FLOG("Out of mem");
     }
+    DLOG("Adding DNS server '%s' for bootstrap resolution.", ipstr);
     if (ares_inet_pton(AF_INET, ipstr, 
                        &options.servers[options.nservers++]) != 1) {
       FLOG("Failed to parse '%s'", ipstr);
@@ -108,7 +125,8 @@ void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
 
   uv_timer_init(d->loop, &d->timer);
   d->timer.data = d;
-  uv_timer_start(&d->timer, timer_cb, 0, interval_seconds);
+  // Start with a shorter polling interval and switch after we've bootstrapped.
+  uv_timer_start(&d->timer, timer_cb, 0, POLLER_INTVL_ERR);
 }
 
 void dns_poller_cleanup(dns_poller_t *d) {

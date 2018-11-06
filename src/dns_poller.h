@@ -4,8 +4,16 @@
 #include <ares.h>
 #include <uv.h>
 
+// Due to c-ares not playing nicely with libuv ( JS: also true for libuv? TBD )
+// the intervals below also wind up functioning as the timeout values after 
+// which any pending queries are cancelled and treated as if they've failed.
+// In libuv these are milliseconds instead of seconds compared to libev!
+#define POLLER_INTVL_NORM 120000
+#define POLLER_INTVL_ERR 5000
+
 // Callback to be called periodically when we get a valid DNS response.
-typedef void (*dns_poller_cb)(void *data, struct sockaddr_in *addr);
+typedef void (*dns_poller_cb)(const char* hostname, void *data,
+                              struct sockaddr_in *addr);
 
 typedef struct {
   ares_channel ares;
@@ -29,7 +37,7 @@ typedef struct {
 // dns_poller_cleanup called.
 void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
                      const char *bootstrap_dns, const char *hostname,
-                     int interval_seconds, dns_poller_cb cb, void *cb_data);
+                     dns_poller_cb cb, void *cb_data);
 
 // Tears down timer and frees resources associated with a dns poller.
 void dns_poller_cleanup(dns_poller_t *d);

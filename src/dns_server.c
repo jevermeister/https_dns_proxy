@@ -64,7 +64,6 @@ void receive_request_cb(uv_udp_t *req, ssize_t nread, const uv_buf_t *recbuf,
   }
   p += enc_len;
   uint16_t type = ntohs(*(uint16_t *)p);
-  p += 2;
 
   d->cb(d, d->cb_data, *((struct sockaddr_in*)raddr), tx_id, flags, domain_name, type);
 

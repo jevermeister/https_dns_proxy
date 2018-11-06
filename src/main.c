@@ -7,8 +7,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+
 #include <ares.h>
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <curl/curl.h>
 #include <errno.h>
 #include <uv.h>
@@ -35,6 +37,8 @@
 typedef struct {
   https_client_t *https_client;
   struct curl_slist *resolv;
+  const char *resolver_url_prefix;
+  uint8_t using_dns_poller;
   // currently only used for edns_client_subnet, if specified.
   const char *extra_request_args;
 } app_state_t;
@@ -44,6 +48,26 @@ typedef struct {
   struct sockaddr_in raddr;
   dns_server_t *dns_server;
 } request_t;
+
+// Very very basic hostname parsing.
+// Note: Performs basic checks to see if last digit is non-alpha.
+// Non-alpha hostnames are assumed to be IP addresses. e.g. foo.1
+// Returns non-zero on success, zero on failure.
+static int hostname_from_uri(const char* uri,
+                             char* hostname, int hostname_len) {
+  if (strncmp(uri, "https://", 8) != 0) { return 0; }  // not https://
+  uri += 8;
+  const char *end = uri;
+  while (*end && *end != '/') { end++; }
+  if (end - uri >= hostname_len) {
+    return 0;
+  }
+  if (end == uri) { return 0; }  // empty string.
+  if (!isalpha(*(end - 1))) { return 0; }  // last digit non-alpha.
+  strncpy(hostname, uri, end - uri);
+  hostname[end - uri] = 0;
+  return 1;
+}
 
 static void sigint_cb(uv_signal_t *w, int signum) {
   uv_stop(w->loop);
@@ -91,18 +115,27 @@ static void dns_server_cb(dns_server_t *dns_server, void *data,
   DLOG("Received request for '%s' id: %04x, type %d, flags %04x", name, tx_id,
        type, flags);
 
+  // If we're not yet bootstrapped, don't answer. libcurl will fall back to
+  // gethostbyname() which can cause a DNS loop due to the nameserver listed
+  // in resolv.conf being or depending on https_dns_proxy itself.
+  if(app->using_dns_poller && (app->resolv == NULL || app->resolv->data == NULL)) {
+    WLOG("Query received before bootstrapping is completed, discarding.");
+    return;
+  }
+
   // Build URL
   int cd_bit = flags & (1 << 4);
   char *escaped_name = curl_escape(name, strlen(name));
   char url[1500] = "";
   snprintf(url, sizeof(url) - 1,
-           "https://dns.google.com/resolve?name=%s&type=%d%s%s",
-           escaped_name, type, cd_bit ? "&cd=true" : "",
+           "%sname=%s&type=%d%s%s",
+           app->resolver_url_prefix,
+           escaped_name, type, (cd_bit != 0) ? "&cd=true" : "",
            app->extra_request_args);
   curl_free(escaped_name);
 
   request_t *req = (request_t *)calloc(1, sizeof(request_t));
-  if (!req) {
+  if (req == NULL) {
     FLOG("Out of mem");
   }
   req->tx_id = tx_id;
@@ -111,12 +144,14 @@ static void dns_server_cb(dns_server_t *dns_server, void *data,
   https_client_fetch(app->https_client, url, app->resolv, https_resp_cb, req);
 }
 
-static void dns_poll_cb(void *data, struct sockaddr_in *addr) {
+static void dns_poll_cb(const char* hostname, void *data, struct sockaddr_in *addr) {
   struct curl_slist **resolv = (struct curl_slist **)data;
-  char buf[128] = "dns.google.com:443:";
-  char *end = &buf[128];
+  char buf[280];
+  memset(buf, 0, sizeof(buf));
+  if (strlen(hostname) > 254) { FLOG("Hostname too long."); }
+  snprintf(buf, sizeof(buf) - 1, "%s:443:", hostname);
   char *pos = buf + strlen(buf);
-  ares_inet_ntop(AF_INET, addr, pos, end - pos);
+  ares_inet_ntop(AF_INET, addr, pos, buf + sizeof(buf) - 1 - pos);
   DLOG("Received new IP '%s'", pos);
   curl_slist_free_all(*resolv);
   *resolv = curl_slist_append(NULL, buf);
@@ -127,11 +162,13 @@ static int proxy_supports_name_resolution(const char *proxy)
   int i;
   const char *ptypes[] = {"http:", "https:", "socks4a:", "socks5h:"};
 
-  if (proxy == NULL)
+  if (proxy == NULL) {
     return 0;
+  }
   for (i = 0; i < sizeof(ptypes) / sizeof(*ptypes); i++) {
-    if (strncasecmp(proxy, ptypes[i], strlen(ptypes[i])) == 0)
+    if (strncasecmp(proxy, ptypes[i], strlen(ptypes[i])) == 0) {
       return 1;
+    }
   }
   return 0;
 }
@@ -165,6 +202,9 @@ int main(int argc, char *argv[]) {
   app_state_t app;
   app.https_client = &https_client;
   app.resolv = NULL;
+  app.resolver_url_prefix = opt.resolver_url_prefix;
+  app.using_dns_poller = 0;
+
   if (opt.edns_client_subnet[0]) {
     static char buf[200];
     memset(buf, 0, sizeof(buf));
@@ -179,13 +219,14 @@ int main(int argc, char *argv[]) {
   dns_server_init(&dns_server, loop, opt.listen_addr, opt.listen_port,
                   dns_server_cb, &app);
 
+  if (opt.gid != -1 && setgid(opt.gid)) {
+    FLOG("Failed to set gid.");
+  }
+  if (opt.uid != -1 && setuid(opt.uid)) {
+    FLOG("Failed to set uid.");
+  }
+
   if (opt.daemonize) {
-    if (setgid(opt.gid)) {
-      FLOG("Failed to set gid.");
-    }
-    if (setuid(opt.uid)) {
-      FLOG("Failed to set uid.");
-    }
     // daemon() is non-standard. If needed, see OpenSSH openbsd-compat/daemon.c
     daemon(0, 0);
   }
@@ -201,15 +242,24 @@ int main(int argc, char *argv[]) {
   logging_flush_init(loop);
 
   dns_poller_t dns_poller;
+  char hostname[255];  // Domain names shouldn't exceed 253 chars.
   if (!proxy_supports_name_resolution(opt.curl_proxy)) {
-    dns_poller_init(&dns_poller, loop, opt.bootstrap_dns, "dns.google.com",
-                    120000 /* milliseconds */, dns_poll_cb, &app.resolv);
+    if (hostname_from_uri(opt.resolver_url_prefix, hostname, 254)) {
+      app.using_dns_poller = 1;
+      dns_poller_init(&dns_poller, loop, opt.bootstrap_dns, hostname,
+                      dns_poll_cb, &app.resolv);
+      ILOG("DNS polling initialized for '%s'", hostname);
+    } else {
+      ILOG("Resolver prefix '%s' doesn't appear to contain a "
+           "hostname. DNS polling disabled.", opt.resolver_url_prefix);
+    }
   }
 
   uv_run(loop, UV_RUN_DEFAULT);
 
-  if (!proxy_supports_name_resolution(opt.curl_proxy))
+  if (!proxy_supports_name_resolution(opt.curl_proxy)) {
     dns_poller_cleanup(&dns_poller);
+}
 
   curl_slist_free_all(app.resolv);
 
