@@ -64,34 +64,6 @@ $ make
 
 There is no installer at this stage - just run it.
 
-<<<<<<< HEAD
-### OpenWRT package install
-
-I maintain a package in the [OpenWRT packages](https://github.com/openwrt/packages) repository as well.
-You can install as follows:
-
-```
-root@OpenWrt:~# opkg update
-root@OpenWrt:~# opkg install https_dns_proxy
-root@OpenWrt:~# /etc/init.d/https_dns_proxy enable
-root@OpenWrt:~# /etc/init.d/https_dns_proxy start
-```
-
-Replace any 'list server' lines in `/etc/config/dhcp` with:
-
-`list server '127.0.0.1#5053'`
-
-You may also want to add the line:
-
-`noresolv '1'`
-
-This prevents dnsmasq from using /etc/resolv.conf DNS servers, leaving only our proxy server.
-
-### archlinux package install
-
-There is also an externally maintained [AUR package](https://aur.archlinux.org/packages/https-dns-proxy-git/) for latest git version. You can install as follows:
-=======
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
 ```
 user@arch:~# yaourt -S https-dns-proxy-git
 ```

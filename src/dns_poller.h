@@ -11,12 +11,6 @@
 #define POLLER_INTVL_NORM 120000
 #define POLLER_INTVL_ERR 5000
 
-// Due to c-ares not playing nicely with libev, the intervals below also
-// wind up functioning as the timeout values after which any pending
-// queries are cancelled and treated as if they've failed.
-#define POLLER_INTVL_NORM 120
-#define POLLER_INTVL_ERR 5
-
 // Callback to be called periodically when we get a valid DNS response.
 typedef void (*dns_poller_cb)(const char* hostname, void *data,
                               struct sockaddr_in *addr);

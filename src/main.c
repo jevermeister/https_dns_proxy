@@ -69,13 +69,8 @@ static int hostname_from_uri(const char* uri,
   return 1;
 }
 
-<<<<<<< HEAD
-static void sigint_cb(struct ev_loop *loop, ev_signal *w, int revents) {
-  ev_break(loop, EVBREAK_ALL);
-=======
 static void sigint_cb(uv_signal_t *w, int signum) {
   uv_stop(w->loop);
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
 }
 
 static void sigpipe_cb(uv_signal_t *w, int signum) {

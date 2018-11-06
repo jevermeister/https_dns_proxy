@@ -46,11 +46,7 @@ static void sock_state_cb(void *data, ares_socket_t sock, int read, int write) {
 
 static void ares_cb(void *arg, int status, int timeouts, struct hostent *h) {
   dns_poller_t *d = (dns_poller_t *)arg;
-<<<<<<< HEAD
-  ev_tstamp interval;
-=======
   uint64_t interval;
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
 
   if (status != ARES_SUCCESS) {
     interval = POLLER_INTVL_ERR;
@@ -63,18 +59,10 @@ static void ares_cb(void *arg, int status, int timeouts, struct hostent *h) {
     d->cb(d->hostname, d->cb_data, (struct sockaddr_in *)h->h_addr_list[0]);
   }
 
-<<<<<<< HEAD
-  if(interval != d->timer.repeat) {
-    DLOG("DNS poll interval changed from %.0lf -> %.0lf", d->timer.repeat, interval);
-    ev_timer_stop(d->loop, &d->timer);
-    ev_timer_set(&d->timer, interval, interval);
-    ev_timer_start(d->loop, &d->timer);
-=======
   if(interval != uv_timer_get_repeat(&d->timer)) {
     DLOG("DNS poll interval changed from %i -> %i", uv_timer_get_repeat(&d->timer) / 1000, interval / 1000);
     uv_timer_stop(&d->timer);
     uv_timer_set_repeat(&d->timer, interval);
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
   }
 }
 
@@ -91,14 +79,6 @@ static void timer_cb(uv_timer_t *w) {
 void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
                      const char *bootstrap_dns, const char *hostname,
                      dns_poller_cb cb, void *cb_data) {
-<<<<<<< HEAD
-  int i;
-  for (i = 0; i < FD_SETSIZE; i++) {
-    d->fd[i].fd = 0;
-  }
-
-=======
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
   int r;
   ares_library_init(ARES_LIB_INIT_ALL);
 
@@ -143,12 +123,7 @@ void dns_poller_init(dns_poller_t *d, uv_loop_t *loop,
   d->cb_data = cb_data;
   d->poll_handle.data = NULL;
 
-<<<<<<< HEAD
-  // Start with a shorter polling interval and switch after we've bootstrapped.
-  ev_timer_init(&d->timer, timer_cb, 0, POLLER_INTVL_ERR);
-=======
   uv_timer_init(d->loop, &d->timer);
->>>>>>> ade74d50bb43467b330f1b782730610ea64bcbc4
   d->timer.data = d;
   // Start with a shorter polling interval and switch after we've bootstrapped.
   uv_timer_start(&d->timer, timer_cb, 0, POLLER_INTVL_ERR);
