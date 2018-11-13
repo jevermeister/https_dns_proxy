@@ -53,36 +53,8 @@ static void watcher_cb(struct ev_loop *loop, ev_io *w, int revents) {
     WLOG("recvfrom failed: %s", strerror(errno));
     return;
   }
-
-  unsigned char *p = buf;
-  uint16_t tx_id = ntohs(*(uint16_t *)p);
-  p += 2;
-  uint16_t flags = ntohs(*(uint16_t *)p);
-  p += 2;
-  uint16_t num_q = ntohs(*(uint16_t *)p);
-  p += 2;
-  //uint16_t num_rr = ntohs(*(uint16_t *)p);
-  p += 2;
-  //uint16_t num_arr = ntohs(*(uint16_t *)p);
-  p += 2;
-  //uint16_t num_xrr = ntohs(*(uint16_t *)p);
-  p += 2;
-  if (num_q != 1) {
-    DLOG("Malformed request received.");
-    return;
-  };
-  char *domain_name;
-  long enc_len;
-  if (ares_expand_name(p, buf, len, &domain_name, &enc_len) != ARES_SUCCESS) {
-    DLOG("Malformed request received.");
-    return;
-  }
-  p += enc_len;
-  uint16_t type = ntohs(*(uint16_t *)p);
-
-  d->cb(d, d->cb_data, raddr, tx_id, flags, domain_name, type);
-
-  ares_free_string(domain_name);
+  
+  d->cb(d, d->cb_data, raddr, buf, len);
 }
 
 void dns_server_init(dns_server_t *d, struct ev_loop *loop,

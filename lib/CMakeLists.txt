@@ -1,5 +1,4 @@
-set(NXJSON_DIR nxjson/)
-set(NXJSON_SRC ${NXJSON_DIR}/nxjson.c)
+set(BASE64URL_DIR base64url/)
+set(BASE64URL_SRC ${BASE64URL_DIR}/base64url.c)
 
-add_library(nxjson ${NXJSON_SRC})
-
+add_library(base64url ${BASE64URL_SRC})
