@@ -1,27 +1,18 @@
-# https-dns-proxy
+# https-dns-proxy DNS wireformat variant
 
 https\_dns\_proxy is a light-weight DNS&lt;--&gt;HTTPS, non-caching translation
 proxy for the emerging [DoH](https://datatracker.ietf.org/doc/charter-ietf-doh/)
 DNS-over-HTTPS standard. It receives regular (UDP) DNS requests and issues them
 via DoH.
 
-Google's [DNS-over-HTTPS](https://developers.google.com/speed/public-dns/docs/dns-over-https)
-service is default, but [Cloudflare's
-service](https://developers.cloudflare.com/1.1.1.1/dns-over-https/) also works
-with trivial commandline flag changes.
-
-### Using Google
-
-```bash
-# ./https_dns_proxy -u nobody -g nogroup -d -b 8.8.8.8,8.8.4.4 \
-    -r "https://dns.google.com/resolve?"
-```
+[Cloudflare's service](https://developers.cloudflare.com/1.1.1.1/dns-over-https/) 
+is default, but also services can be used with trivial commandline flag changes.
 
 ### Using Cloudflare
 
 ```bash
 # ./https_dns_proxy -u nobody -g nogroup -d -b 1.1.1.1,1.0.0.1 \
-    -r "https://cloudflare-dns.com/dns-query?ct=application/dns-json&"
+    -r "https://cloudflare-dns.com/dns-query?ct=application/dns-message&"
 ```
 
 ## Why?
@@ -110,7 +101,7 @@ Usage: ./https_dns_proxy [-a <listen_addr>] [-p <listen_port>]
   -g group               Group to drop to launched as root. (nobody)
   -b dns_servers         Comma separated IPv4 address of DNS servers
                          to resolve resolver host (e.g. dns.google.com).  (8.8.8.8,1.1.1.1,8.8.4.4,1.0.0.1,145.100.185.15,145.100.185.16,185.49.141.37)
-  -r resolver_url_prefix The HTTPS path to the JSON resolver URL.  (https://dns.google.com/resolve?)
+  -r resolver_url_prefix The HTTPS path to the DNS wireformat resolver URL. (https://1.1.1.1/dns-query?ct&)
   -e subnet_addr         An edns-client-subnet to use such as "203.31.0.0/16".  ()
   -t proxy_server        Optional HTTP proxy. e.g. socks5://127.0.0.1:1080
                          (Initial DNS resolution can't be done over this.)
@@ -124,19 +115,11 @@ Usage: ./https_dns_proxy [-a <listen_addr>] [-p <listen_port>]
 
 * Test coverage could be better.
 
-## Alternative protocols
+## Remarks in comparison to JSON
 
-The DoH standard is still evolving. Because responses are translated into
-JSON, there is room for error in encoding and parsing response types -
-particularly the less common ones.
-
-For this reason, I tend to believe [DNS-over-TLS](https://developers.cloudflare.com/1.1.1.1/dns-over-tls/) is a better
-long-term strategy for the industry, but proxy clients aren't yet
-readily available. 
-
-Note that fundamental differences (binary vs JSON encoding) mean this
-software does not and will not support DNS-over-TLS.
+As the DNS query is just base64url encoded, transmitted to the resolver and the reply is sent back without changes, it is likely less error prone and requires no special treatment of exotic DNS replies. 
 
 ## Authors
 
 * Aaron Drew (aarond10@gmail.com)
+* Jan Schlemminger (DNS wireformat variant)
